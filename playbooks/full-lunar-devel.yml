@@ -3,6 +3,7 @@
   become: yes
   vars:
     katello_repositories_version: nightly
+    katello_repositories_environment: staging
     foreman_installer_scenario: katello-devel
     foreman_installer_options_internal_use_only:
       - "--disable-system-checks"
@@ -25,7 +26,7 @@
       uri:
         url: "https://github.com/{{ katello_devel_github_username }}/{{ item.split('/') | last }}"
       with_items: "{{ foreman_installer_options_internal_use_only }}"
-      when: item | search("katello-devel-extra-plugins")  
+      when: item | search("katello-devel-extra-plugins")
 
 
     - name: "Check forks of user's katello repository"
@@ -103,6 +104,15 @@
              --enable="rhel-7-server-optional-rpms"
       when: ansible_distribution == "RedHat"
 
+    - name: "check workaround: rejecting of inaccessible IP 169.254.169.254"
+      shell: "firewall-cmd --direct --get-rules ipv4 filter OUTPUT | grep -c 169.254.169.254"
+      register: res
+      ignore_errors: True
+
+    - name: "Add workaround: rejecting of inaccessible IP 169.254.169.254"
+      shell: firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -d 169.254.169.254 -j REJECT; firewall-cmd --reload
+      when: res.rc != 0
+
     - name: "Original luna roles"
       block:
         - import_role:
@@ -130,15 +140,15 @@
           vars:
             remote_user: vagrant
 
-        - name: "Workaround for puppet-katello_devel Pull request 145"
-          yum:
-            name:  katello-installer-base
-            state: present
-
-        - copy:
-            content: "gemspec :path => '../<%= scope['plugin'] %>', :development_group => '<%= scope['plugin'] %>_dev', :name => '<%= scope['plugin'] %>'\n"
-            dest: /usr/share/katello-installer-base/modules/katello_devel/templates/plugin.local.rb.erb
-            mode: 0644
+#        - name: "Workaround for puppet-katello_devel Pull request 145"
+#          yum:
+#            name:  katello-installer-base
+#            state: present
+#
+#        - copy:
+#            content: "gemspec :path => '../<%= scope['plugin'] %>', :development_group => '<%= scope['plugin'] %>_dev', :name => '<%= scope['plugin'] %>'\n"
+#            dest: /usr/share/katello-installer-base/modules/katello_devel/templates/plugin.local.rb.erb
+#            mode: 0644
 
         - import_role:
             name: foreman_devel
@@ -159,36 +169,36 @@
 #        path: /home/vagrant/foreman
 #      become_user: vagrant
    
-    - name: "Install packages based on package.json."
-      shell:  bash -lc "npm install || node ./script/npm_install_plugins.js"
-      args:
-         chdir: /home/vagrant/foreman
-      become_user: vagrant
+#    - name: "Install packages based on package.json."
+#      shell:  bash -lc "npm install || node ./script/npm_install_plugins.js"
+#      args:
+#         chdir: /home/vagrant/foreman
+#      become_user: vagrant
 
-    - name: "Compile Webpack"
-      shell:  bash -lc "rake webpack:compile"
-      args:
-         chdir: /home/vagrant/foreman
-      become_user: vagrant
+#    - name: "Compile Webpack"
+#      shell:  bash -lc "rake webpack:compile"
+#      args:
+#         chdir: /home/vagrant/foreman
+#      become_user: vagrant
 
-    - name: "DB migrate"
-      shell: bash -lc "rake db:migrate"
-      args:
-        chdir: /home/vagrant/foreman
-      become_user: vagrant
+#    - name: "DB migrate"
+#      shell: bash -lc "rake db:migrate"
+#      args:
+#        chdir: /home/vagrant/foreman
+#      become_user: vagrant
 
-    - name: "DB seed"
-      shell: bash -lc "rake db:seed"
-      args:
-         chdir: /home/vagrant/foreman
-      become_user: vagrant
+#    - name: "DB seed"
+#      shell: bash -lc "rake db:seed"
+#      args:
+#         chdir: /home/vagrant/foreman
+#      become_user: vagrant
 
-    - name: "Edit configuration settings.yaml"
-      lineinfile:
-        path: /home/vagrant/foreman/config/settings.yaml
-        regexp: '^:webpack_dev_server_https'
-        line: ':webpack_dev_server_https: true'
-      become_user: vagrant
+#    - name: "Edit configuration settings.yaml"
+#      lineinfile:
+#        path: /home/vagrant/foreman/config/settings.yaml
+#        regexp: '^:webpack_dev_server_https'
+#        line: ':webpack_dev_server_https: true'
+#      become_user: vagrant
 
     - name: "Adding of service RH-Satellite-6 to firewall"
       firewalld:
