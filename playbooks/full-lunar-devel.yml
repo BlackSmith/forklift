@@ -1,0 +1,234 @@
+- hosts: devel
+  remote_user: root
+  become: yes
+  vars:
+    katello_repositories_version: nightly
+    foreman_installer_scenario: katello-devel
+    foreman_installer_options_internal_use_only:
+      - "--disable-system-checks"
+      - "--katello-devel-github-username {{ katello_devel_github_username }}"
+      - "--katello-devel-enable-ostree=true"
+      - "--katello-devel-extra-plugins theforeman/foreman_remote_execution"
+      - "--katello-devel-extra-plugins theforeman/foreman_discovery"
+      - "--katello-devel-extra-plugins theforeman/foreman_ansible"
+      - "--katello-devel-extra-plugins theforeman/foreman-tasks"
+      - "--katello-devel-extra-plugins theforeman/foreman_bootdisk"
+      - "--katello-devel-extra-plugins theforeman/foreman_openscap"
+      - "--katello-devel-extra-plugins theforeman/foreman_templates"
+      - "--katello-devel-extra-plugins theforeman/foreman_hooks"
+      - "--katello-devel-extra-plugins theforeman/foreman_docker"
+    foreman_installer_additional_packages:
+      - foreman-installer-katello-devel
+  tasks:
+
+    - name: "Check forks of user's repository"
+      uri:
+        url: "https://github.com/{{ katello_devel_github_username }}/{{ item.split('/') | last }}"
+      with_items: "{{ foreman_installer_options_internal_use_only }}"
+      when: item | search("katello-devel-extra-plugins")  
+
+
+    - name: "Check forks of user's katello repository"
+      uri:
+        url: "https://github.com/{{ katello_devel_github_username }}/katello"
+
+    - name: "Add OS hostname to hosts file" 
+      lineinfile:
+        dest: /etc/hosts
+        regexp: ".*{{ ansible_fqdn }}.*$"
+        line: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }} {{ inventory_hostname}} {{ inventory_hostname_short }}"
+        state: present
+      when: inventory_hostname | search("host.centralci.eng.rdu2.redhat.com") 
+
+    - name: "Create vagrant user manually"
+      user:
+        name: vagrant
+        comment: "John Vagrant"
+
+    - name: "Add vagrant to sudoers"
+      lineinfile:
+        dest: /etc/sudoers.d/vagrant
+        state: present
+        regexp: '^vagrant'
+        line: 'vagrant ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+        create: yes
+
+    - name: "Check /home/vagrant/.ssh/authorized_keys"
+      stat:
+        path: /home/vagrant/.ssh/authorized_keys
+      register: authorized_keys_file
+
+    - block:
+        - name: "Create vagrant .ssh"
+          file:
+            path: /home/vagrant/.ssh
+            owner: vagrant
+            group: root
+            state: directory
+            mode: 0700
+
+        - name: "Synchronize .ssh/authorized_keys"
+          synchronize:
+            src:  /root/.ssh/authorized_keys
+            dest: /home/vagrant/.ssh/authorized_keys
+          delegate_to: "{{ inventory_hostname }}"
+
+        - name: "Set rights for .ssh/authorized_keys"
+          file:             
+            mode: 0600
+            owner: vagrant
+            path: /home/vagrant/.ssh/authorized_keys
+      when: authorized_keys_file.stat.exists == False
+
+    - block:                  
+       - name: "Check registration to CDN"
+         shell: "subscription-manager identity > /dev/null"
+         register: sresult
+         ignore_errors: True
+
+       - name: "Stop installation; the system is not registered to CDN"
+         fail:
+           msg: "Please register the system via subscription-manager before continuing"
+         when: "sresult.rc != 0"
+
+       - name: "Enable only RHEL7 base + optional + extras repos"
+         shell: "{{ item }}"
+         with_items:
+           - subscription-manager repos --disable='*'
+           - >
+             subscription-manager repos 
+             --enable="rhel-7-server-rpms"
+             --enable="rhel-7-server-extras-rpms"
+             --enable="rhel-7-server-optional-rpms"
+      when: ansible_distribution == "RedHat"
+
+    - name: "Original luna roles"
+      block:
+        - import_role:
+            name: etc_hosts
+          vars:
+            remote_user: vagrant
+        - import_role: 
+            name: epel_repositories
+          vars:
+            remote_user: vagrant  
+        - import_role:
+            name: ostree_repositories
+          vars:
+            remote_user: vagrant   
+        - import_role:
+            name: puppet_repositories
+          vars:
+            remote_user: vagrant
+        - import_role:
+            name: foreman_repositories
+          vars:
+            remote_user: vagrant
+        - import_role:
+            name: katello_repositories
+          vars:
+            remote_user: vagrant
+
+        - name: "Workaround for puppet-katello_devel Pull request 145"
+          yum:
+            name:  katello-installer-base
+            state: present
+
+        - copy:
+            content: "gemspec :path => '../<%= scope['plugin'] %>', :development_group => '<%= scope['plugin'] %>_dev', :name => '<%= scope['plugin'] %>'\n"
+            dest: /usr/share/katello-installer-base/modules/katello_devel/templates/plugin.local.rb.erb
+            mode: 0644
+
+        - import_role:
+            name: foreman_devel
+          vars:
+            remote_user: vagrant
+        - import_role:
+            name: foreman_installer
+          vars:
+            remote_user: vagrant
+
+    - name: "Install nodejs"
+      yum:
+        name:  nodejs
+        state: present
+
+#    - name: "Install packages based on package.json."
+#      npm:
+#        path: /home/vagrant/foreman
+#      become_user: vagrant
+   
+    - name: "Install packages based on package.json."
+      shell:  bash -lc "npm install || node ./script/npm_install_plugins.js"
+      args:
+         chdir: /home/vagrant/foreman
+      become_user: vagrant
+
+    - name: "Compile Webpack"
+      shell:  bash -lc "rake webpack:compile"
+      args:
+         chdir: /home/vagrant/foreman
+      become_user: vagrant
+
+    - name: "DB migrate"
+      shell: bash -lc "rake db:migrate"
+      args:
+        chdir: /home/vagrant/foreman
+      become_user: vagrant
+
+    - name: "DB seed"
+      shell: bash -lc "rake db:seed"
+      args:
+         chdir: /home/vagrant/foreman
+      become_user: vagrant
+
+    - name: "Edit configuration settings.yaml"
+      lineinfile:
+        path: /home/vagrant/foreman/config/settings.yaml
+        regexp: '^:webpack_dev_server_https'
+        line: ':webpack_dev_server_https: true'
+      become_user: vagrant
+
+    - name: "Adding of service RH-Satellite-6 to firewall"
+      firewalld:
+        service: RH-Satellite-6
+        permanent: true
+        immediate: true
+        state: enabled
+        
+    - name: "Adding of port 3808 to firewall"
+      firewalld:
+        port: 3808/tcp
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: "Install screen"
+      yum:
+        name:  screen
+        state: present
+
+    - name: "Creating of run-webpack.sh script"
+      copy:
+        content: "#!/bin/bash\npgrep -f webpack-dev-server && pkill -f webpack-dev-server\ncd /home/vagrant/foreman/\nBIND=0.0.0.0 ./node_modules/.bin/webpack-dev-server --config /home/vagrant/foreman/config/webpack.config.js --https --key /etc/pki/katello/private/katello-default-ca.key --cert /etc/pki/katello/certs/katello-default-ca.crt --cacert /etc/pki/katello/certs/katello-default-ca.crt --public $(hostname):3808 2>&1"
+        dest: /home/vagrant/run-webpack.sh
+        mode: 0755
+      become_user: vagrant
+
+    - name: "Run run-webpack.sh in screen"
+      shell: bash -lc "screen -m -d -S \"WebPack\" /home/vagrant/run-webpack.sh"
+      become_user: vagrant
+
+    - name: "Creating of run-foreman.sh script"
+      copy:
+        content: "#!/bin/bash\npgrep -f rails && pkill -f rails\ncd /home/vagrant/foreman/\n rails s 2>&1"
+        dest: /home/vagrant/run-foreman.sh
+        mode: 0755
+      become_user: vagrant  
+
+    - name: "Run foreman in screen"
+      shell: bash -lc "screen -m -d -S \"Foreman\" /home/vagrant/run-foreman.sh"
+      become_user: vagrant
+
+      
