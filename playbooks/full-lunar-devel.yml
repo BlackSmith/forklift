@@ -69,11 +69,11 @@
             state: directory
             mode: 0700
 
-        - name: "Synchronize .ssh/authorized_keys"
-          synchronize:
+        - name: "Copy .ssh/authorized_keys"
+          copy:
+            remote_src: true
             src:  /root/.ssh/authorized_keys
             dest: /home/vagrant/.ssh/authorized_keys
-          delegate_to: "{{ inventory_hostname }}"
 
         - name: "Set rights for .ssh/authorized_keys"
           file:             
