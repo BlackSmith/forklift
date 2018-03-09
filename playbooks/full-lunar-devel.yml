@@ -31,7 +31,10 @@
 
     - name: "Check forks of user's katello repository"
       uri:
-        url: "https://github.com/{{ katello_devel_github_username }}/katello"
+        url: "https://github.com/{{ katello_devel_github_username }}/{{ item }}"
+      with_items:
+        - katello
+        - foreman
 
     - name: "Add OS hostname to hosts file" 
       lineinfile:
