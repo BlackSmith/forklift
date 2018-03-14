@@ -107,6 +107,11 @@
              --enable="rhel-7-server-optional-rpms"
       when: ansible_distribution == "RedHat"
 
+    - name: "Install systemd-devel"
+      yum:
+        name:  systemd-devel
+        state: present
+
     - name: "Start firewalld"
       service: 
         name: firewalld 
