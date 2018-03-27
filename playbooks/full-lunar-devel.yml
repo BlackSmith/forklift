@@ -1,4 +1,4 @@
-- hosts: devel
+- hosts: all
   remote_user: root
   become: yes
   vars:
@@ -110,6 +110,11 @@
     - name: "Install systemd-devel"
       yum:
         name:  systemd-devel
+        state: present
+
+    - name: "Install firewalld"
+      yum:
+        name: firewalld
         state: present
 
     - name: "Start firewalld"
