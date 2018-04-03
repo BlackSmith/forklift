@@ -19,7 +19,7 @@
       - "--katello-devel-extra-plugins theforeman/foreman_hooks"
       - "--katello-devel-extra-plugins theforeman/foreman_docker"
     foreman_installer_additional_packages:
-      - foreman-installer-katello-devel
+      - foreman-installer-katello
   tasks:
 
     - name: "Check forks of user's repository"
@@ -36,13 +36,13 @@
         - katello
         - foreman
 
-    - name: "Add OS hostname to hosts file" 
+    - name: "Add OS hostname to hosts file"
       lineinfile:
         dest: /etc/hosts
         regexp: ".*{{ ansible_fqdn }}.*$"
         line: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }} {{ inventory_hostname}} {{ inventory_hostname_short }}"
         state: present
-      when: inventory_hostname | search("host.centralci.eng.rdu2.redhat.com") 
+      when: inventory_hostname | search("host.centralci.eng.rdu2.redhat.com")
 
     - name: "Create vagrant user manually"
       user:
@@ -79,13 +79,13 @@
             dest: /home/vagrant/.ssh/authorized_keys
 
         - name: "Set rights for .ssh/authorized_keys"
-          file:             
+          file:
             mode: 0600
             owner: vagrant
             path: /home/vagrant/.ssh/authorized_keys
       when: authorized_keys_file.stat.exists == False
 
-    - block:                  
+    - block:
        - name: "Check registration to CDN"
          shell: "subscription-manager identity > /dev/null"
          register: sresult
@@ -101,7 +101,7 @@
          with_items:
            - subscription-manager repos --disable='*'
            - >
-             subscription-manager repos 
+             subscription-manager repos
              --enable="rhel-7-server-rpms"
              --enable="rhel-7-server-extras-rpms"
              --enable="rhel-7-server-optional-rpms"
@@ -118,8 +118,8 @@
         state: present
 
     - name: "Start firewalld"
-      service: 
-        name: firewalld 
+      service:
+        name: firewalld
         state: started
 
     - name: "check workaround: rejecting of inaccessible IP 169.254.169.254"
@@ -137,14 +137,14 @@
             name: etc_hosts
           vars:
             remote_user: vagrant
-        - import_role: 
+        - import_role:
             name: epel_repositories
           vars:
-            remote_user: vagrant  
+            remote_user: vagrant
         - import_role:
             name: ostree_repositories
           vars:
-            remote_user: vagrant   
+            remote_user: vagrant
         - import_role:
             name: puppet_repositories
           vars:
@@ -157,7 +157,11 @@
             name: katello_repositories
           vars:
             remote_user: vagrant
-
+        - import_role:
+            name: foreman_installer
+          vars:
+            remote_user: vagrant
+            foreman_installer_skip_installer: true
 #        - name: "Workaround for puppet-katello_devel Pull request 145"
 #          yum:
 #            name:  katello-installer-base
@@ -169,7 +173,7 @@
 #            mode: 0644
 
         - import_role:
-            name: foreman_devel
+            name: foreman_installer_devel_scenario
           vars:
             remote_user: vagrant
         - import_role:
@@ -186,7 +190,7 @@
 #      npm:
 #        path: /home/vagrant/foreman
 #      become_user: vagrant
-   
+
 #    - name: "Install packages based on package.json."
 #      shell:  bash -lc "npm install || node ./script/npm_install_plugins.js"
 #      args:
@@ -224,7 +228,7 @@
         permanent: true
         immediate: true
         state: enabled
-        
+
     - name: "Adding of port 3808 to firewall"
       firewalld:
         port: 3808/tcp
@@ -253,10 +257,8 @@
         content: "#!/bin/bash\npgrep -f rails && pkill -f rails\ncd /home/vagrant/foreman/\n rails s 2>&1"
         dest: /home/vagrant/run-foreman.sh
         mode: 0755
-      become_user: vagrant  
+      become_user: vagrant
 
     - name: "Run foreman in screen"
       shell: bash -lc "screen -m -d -S \"Foreman\" /home/vagrant/run-foreman.sh"
       become_user: vagrant
-
-      
